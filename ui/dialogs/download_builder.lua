@@ -14,7 +14,6 @@ local util = require("util")
 local _ = require("gettext")
 
 local Constants = require("models.constants")
-local OPDSPSE = require("services.kavita")
 
 local DownloadDialogBuilder = {}
 
@@ -27,7 +26,6 @@ local DownloadDialogBuilder = {}
 function DownloadDialogBuilder.buildDownloadDialog(browser, item, filename, createTitle)
 	local acquisitions = item.acquisitions
 	local buttons = {}
-	local stream_buttons
 	local download_buttons = {}
 	local DownloadManager = require("core.download_manager")
 
@@ -35,44 +33,7 @@ function DownloadDialogBuilder.buildDownloadDialog(browser, item, filename, crea
 	local filename_orig = filename
 
 	for i, acquisition in ipairs(acquisitions) do
-		if acquisition.count then
-			-- PSE Stream buttons
-			stream_buttons = {
-				{
-					{
-						text = Constants.ICONS.STREAM_START .. " " .. _("Page stream"),
-						callback = function()
-							OPDSPSE:streamPages(acquisition.href, acquisition.count, false,
-								browser.root_catalog_username, browser.root_catalog_password)
-							UIManager:close(browser.download_dialog)
-						end,
-					},
-					{
-						text = _("Stream from page") .. " " .. Constants.ICONS.STREAM_NEXT,
-						callback = function()
-							OPDSPSE:streamPages(acquisition.href, acquisition.count, true,
-								browser.root_catalog_username, browser.root_catalog_password)
-							UIManager:close(browser.download_dialog)
-						end,
-					},
-				},
-			}
-
-			if acquisition.last_read then
-				table.insert(stream_buttons, {
-					{
-						text = Constants.ICONS.STREAM_RESUME .. " " ..
-							_("Resume stream from page") .. " " .. acquisition.last_read,
-						callback = function()
-							OPDSPSE:streamPages(acquisition.href, acquisition.count, false,
-								browser.root_catalog_username, browser.root_catalog_password,
-								acquisition.last_read)
-							UIManager:close(browser.download_dialog)
-						end,
-					},
-				})
-			end
-		elseif acquisition.type == "borrow" then
+		if acquisition.type == "borrow" then
 			table.insert(download_buttons, {
 				text = _("Borrow"),
 				enabled = false,
@@ -110,14 +71,6 @@ function DownloadDialogBuilder.buildDownloadDialog(browser, item, filename, crea
 	end
 
 	-- Build final button array
-	if stream_buttons then
-		for _, button_row in ipairs(stream_buttons) do
-			table.insert(buttons, button_row)
-		end
-		if #download_buttons > 0 then
-			table.insert(buttons, {})
-		end
-	end
 	for _, button in ipairs(download_buttons) do
 		table.insert(buttons, { button })
 	end
@@ -184,9 +137,6 @@ function DownloadDialogBuilder.buildDownloadDialog(browser, item, filename, crea
 			text = _("Book cover"),
 			enabled = cover_link and true or false,
 			callback = function()
-				-- Use PSE streaming to view the cover as a single page
-				OPDSPSE:streamPages(cover_link, 1, false,
-					browser.root_catalog_username, browser.root_catalog_password)
 			end,
 		},
 		{

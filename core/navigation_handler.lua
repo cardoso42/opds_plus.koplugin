@@ -6,6 +6,8 @@ local socket_url = require("socket.url")
 local util = require("util")
 local _ = require("gettext")
 
+local UIManager = require("ui/uimanager")
+local InfoMessage = require("ui/widget/infomessage")
 local Constants = require("models.constants")
 local UrlUtils = require("utils.url_utils")
 local CatalogUtils = require("utils.catalog_utils")
@@ -222,6 +224,14 @@ function NavigationHandler.updateCatalog(item_url, browser, paths_updated)
 	local context = BrowserContext.fromBrowser(browser)
 	local debug_callback = function(...) if browser._debugLog then browser:_debugLog(...) end end
 
+	local UIManager = require("ui/uimanager")
+	local InfoMessage = require("ui/widget/infomessage")
+	local loading_msg = InfoMessage:new {
+		text = _("Loading books..."),
+	}
+	UIManager:show(loading_msg)
+	UIManager:forceRePaint()
+
 	local menu_table = FeedFetcher.genItemTableFromURL(
 		item_url,
 		context.username,
@@ -235,6 +245,8 @@ function NavigationHandler.updateCatalog(item_url, browser, paths_updated)
 			return items
 		end
 	)
+
+	UIManager:close(loading_msg)
 
 	-- Count how many have covers
 	local cover_count = 0
@@ -253,22 +265,10 @@ function NavigationHandler.updateCatalog(item_url, browser, paths_updated)
 		end
 		browser:switchItemTable(browser.catalog_title, menu_table)
 
-		-- Set appropriate title bar icon based on content
-		if browser.facet_groups or browser.search_url then
-			-- Has facets/search - use facet menu
-			browser.title_bar_left_icon = Constants.ICONS.MENU
-			browser.onLeftButtonTap = function()
-				browser:showFacetMenu()
-			end
-		else
-			-- No facets - use catalog menu for view toggle + add catalog
-			browser.title_bar_left_icon = cover_count > 0 and Constants.ICONS.MENU or Constants.ICONS.PLUS
-			browser.onLeftButtonTap = function()
-				if cover_count > 0 then
-					browser:showCatalogMenu()
-				else
-					browser:addSubCatalog(item_url)
-				end
+		browser.title_bar_left_icon = Constants.ICONS.MENU
+		browser.onLeftButtonTap = function()
+			if browser.toggle_sidebar_callback then
+				browser.toggle_sidebar_callback()
 			end
 		end
 
@@ -292,6 +292,12 @@ function NavigationHandler.appendCatalog(item_url, browser)
 	local context = BrowserContext.fromBrowser(browser)
 	local debug_callback = function(...) if browser._debugLog then browser:_debugLog(...) end end
 
+	local loading_msg = InfoMessage:new {
+		text = _("Loading more books..."),
+	}
+	UIManager:show(loading_msg)
+	UIManager:forceRePaint()
+
 	local menu_table = FeedFetcher.genItemTableFromURL(
 		item_url,
 		context.username,
@@ -304,6 +310,8 @@ function NavigationHandler.appendCatalog(item_url, browser)
 			return items
 		end
 	)
+
+	UIManager:close(loading_msg)
 
 	if #menu_table > 0 then
 		for __, item in ipairs(menu_table) do

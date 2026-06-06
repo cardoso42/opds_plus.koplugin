@@ -9,15 +9,6 @@ local SettingsMenu = {}
 function SettingsMenu.create(plugin)
 	return {
 		{
-			text = _("Browse Catalogs"),
-			callback = function()
-				plugin:onShowOPDSPlusCatalog()
-			end,
-		},
-		{
-			text = _("Settings"),
-			sub_item_table = {
-				{
 					text = _("Cover Settings"),
 					sub_item_table = {
 						{
@@ -286,16 +277,68 @@ function SettingsMenu.create(plugin)
 					},
 				},
 				{
-					text = T(_("About OPDS Plus v%1"), Version.VERSION),
+					text = _("Change Calibre-Web URL"),
+					callback = function()
+						local MultiInputDialog = require("ui/widget/multiinputdialog")
+						local url_dialog
+						url_dialog = MultiInputDialog:new{
+							title = _("Enter Calibre-Web Details"),
+							fields = {
+								{ hint = _("Calibre-Web URL"), text = plugin:getSetting("calibre_web_url") or "http://" },
+								{ hint = _("Username (optional)"), text = plugin:getSetting("calibre_web_username") or "" },
+								{ hint = _("Password (optional)"), text = plugin:getSetting("calibre_web_password") or "", text_type = "password" },
+							},
+							buttons = {
+								{
+									{
+										text = _("Cancel"),
+										id = "close",
+										callback = function()
+											UIManager:close(url_dialog)
+										end
+									},
+									{
+										text = _("Save"),
+										callback = function()
+											local fields = url_dialog:getFields()
+											local input_url = fields[1]
+											local input_user = fields[2]
+											local input_pass = fields[3]
+											if input_url and input_url ~= "" and input_url ~= "http://" then
+												UIManager:close(url_dialog)
+												plugin:saveSetting("calibre_web_url", input_url)
+												if input_user and input_user ~= "" then
+													plugin:saveSetting("calibre_web_username", input_user)
+												else
+													plugin:saveSetting("calibre_web_username", nil)
+												end
+												if input_pass and input_pass ~= "" then
+													plugin:saveSetting("calibre_web_password", input_pass)
+												else
+													plugin:saveSetting("calibre_web_password", nil)
+												end
+												UIManager:show(InfoMessage:new {
+													text = _("Calibre-Web URL and credentials updated.\nChanges apply on next catalog browse."),
+													timeout = 3,
+												})
+											end
+										end
+									}
+								}
+							}
+						}
+						UIManager:show(url_dialog)
+					end,
+				},
+				{
+					text = T(_("About Calibre-Web Plugin v%1"), Version.VERSION),
 					callback = function()
 						UIManager:show(InfoMessage:new {
-							text = T(_("OPDS Plus Plugin\nVersion: %1\n\nAn enhanced OPDS catalog browser with cover display support.\n\nFeatures:\n• List and Grid view modes\n• Customizable covers and fonts\n• Grid border options\n\nBased on KOReader's OPDS plugin"), Version.VERSION),
+							text = T(_("Calibre-Web Plugin\nVersion: %1\n\nA specific OPDS client for Calibre-Web.\n\nBased on KOReader's OPDS plugin and OPDS Plus"), Version.VERSION),
 							timeout = 5,
 						})
 					end,
 				},
-			},
-		},
 	}
 end
 

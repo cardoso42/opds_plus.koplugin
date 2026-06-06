@@ -34,7 +34,6 @@ local Screen = Device.screen
 local T = require("ffi/util").template
 
 local Constants = require("models.constants")
-local OPDSPSE = require("services.kavita")
 
 local BookInfoDialog = {}
 
@@ -45,10 +44,7 @@ local BookInfoDialog = {}
 local function formatAvailableFormats(acquisitions, DownloadManager)
 	local formats = {}
 	for i, acquisition in ipairs(acquisitions) do
-		if acquisition.count then
-			-- PSE streaming
-			table.insert(formats, _("Stream") .. " (" .. acquisition.count .. " " .. _("pages") .. ")")
-		elseif acquisition.type == "borrow" then
+		if acquisition.type == "borrow" then
 			table.insert(formats, _("Borrow"))
 		else
 			local filetype = DownloadManager.getFiletype(acquisition)
@@ -63,26 +59,14 @@ local function formatAvailableFormats(acquisitions, DownloadManager)
 	return table.concat(formats, ", ")
 end
 
---- Check if item has PSE streaming available
--- @param acquisitions table List of acquisitions
--- @return table|nil PSE acquisition or nil
-local function getPSEAcquisition(acquisitions)
-	for _, acquisition in ipairs(acquisitions) do
-		if acquisition.count then
-			return acquisition
-		end
-	end
-	return nil
-end
-
---- Get downloadable acquisitions (non-PSE, non-borrow)
+--- Get downloadable acquisitions (non-borrow)
 -- @param acquisitions table List of acquisitions
 -- @param DownloadManager table DownloadManager module
 -- @return table List of downloadable acquisitions with filetype
 local function getDownloadableAcquisitions(acquisitions, DownloadManager)
 	local downloadable = {}
 	for _, acquisition in ipairs(acquisitions) do
-		if not acquisition.count and acquisition.type ~= "borrow" then
+		if acquisition.type ~= "borrow" then
 			local filetype = DownloadManager.getFiletype(acquisition)
 			if filetype then
 				table.insert(downloadable, {
@@ -183,8 +167,7 @@ function BookInfoDialog.build(browser, item)
 		browser._custom_filename = browser._custom_filename or util.replaceAllInvalidChars(base_filename)
 	end
 
-	-- Get PSE and downloadable acquisitions
-	local pse_acquisition = getPSEAcquisition(item.acquisitions)
+	-- Get downloadable acquisitions
 	local downloadable = getDownloadableAcquisitions(item.acquisitions, DownloadManager)
 
 	-- Dialog dimensions
@@ -197,16 +180,8 @@ function BookInfoDialog.build(browser, item)
 	local cover_height = math.floor(screen_height * 0.25)
 	local cover_width = math.floor(cover_height * (2 / 3)) -- book aspect ratio
 
-	-- Cover link for full view and high-res loading
+	-- Cover link for high-res loading
 	local cover_link = item.image or item.thumbnail
-
-	-- Function to show full cover
-	local function showFullCover()
-		if cover_link then
-			OPDSPSE:streamPages(cover_link, 1, false,
-				browser.root_catalog_username, browser.root_catalog_password)
-		end
-	end
 
 	-- Build cover widget - make it tappable
 	local cover_container
@@ -235,23 +210,11 @@ function BookInfoDialog.build(browser, item)
 			}
 		end
 
-		-- Wrap in InputContainer to make it tappable
-		cover_container = InputContainer:new {
+		-- Wrap in CenterContainer
+		cover_container = CenterContainer:new {
 			dimen = Geom:new { w = cover_width, h = cover_height },
 			initial_cover_widget,
 		}
-		cover_container.ges_events = {
-			TapCover = {
-				GestureRange:new {
-					ges = "tap",
-					range = cover_container.dimen,
-				},
-			},
-		}
-		function cover_container:onTapCover()
-			showFullCover()
-			return true
-		end
 
 		-- Load high-res cover asynchronously if we have a URL
 		if cover_link then
@@ -397,44 +360,7 @@ function BookInfoDialog.build(browser, item)
 	-- Build buttons
 	local buttons_table = {}
 
-	-- Row 1: Stream buttons (if PSE available)
-	if pse_acquisition then
-		local stream_row = {
-			{
-				text = Constants.ICONS.STREAM_START .. " " .. _("Stream"),
-				callback = function()
-					UIManager:close(browser.book_info_dialog)
-					OPDSPSE:streamPages(pse_acquisition.href, pse_acquisition.count, false,
-						browser.root_catalog_username, browser.root_catalog_password)
-				end,
-			},
-			{
-				text = _("Stream from page") .. " " .. Constants.ICONS.STREAM_NEXT,
-				callback = function()
-					UIManager:close(browser.book_info_dialog)
-					OPDSPSE:streamPages(pse_acquisition.href, pse_acquisition.count, true,
-						browser.root_catalog_username, browser.root_catalog_password)
-				end,
-			},
-		}
-
-		if pse_acquisition.last_read then
-			table.insert(buttons_table, stream_row)
-			table.insert(buttons_table, {
-				text = Constants.ICONS.STREAM_RESUME .. " " .. _("Resume") .. " (" .. pse_acquisition.last_read .. ")",
-				callback = function()
-					UIManager:close(browser.book_info_dialog)
-					OPDSPSE:streamPages(pse_acquisition.href, pse_acquisition.count, false,
-						browser.root_catalog_username, browser.root_catalog_password,
-						pse_acquisition.last_read)
-				end,
-			})
-		else
-			table.insert(buttons_table, stream_row)
-		end
-	end
-
-	-- Row 2: Download and Queue buttons
+	-- Row 1: Download and Queue buttons
 	if #downloadable > 0 then
 		local action_row = {}
 

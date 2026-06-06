@@ -2,9 +2,10 @@ local BD = require("ui/bidi")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
-local OPDSBrowser = require("ui.browser")
+local CalibreWebLayout = require("ui.calibre_web_layout")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local MultiInputDialog = require("ui/widget/multiinputdialog")
 local lfs = require("libs/libkoreader-lfs")
 local util = require("util")
 local _ = require("gettext")
@@ -27,7 +28,6 @@ local OPDS = WidgetContainer:extend {
     name = "opdsplus",
     opds_settings_file = DataStorage:getSettingsDir() .. "/opdsplus.lua",
     settings = nil,
-    servers = nil,
     downloads = nil,
 }
 
@@ -47,8 +47,7 @@ function OPDS:init()
     -- Initialize state manager singleton
     StateManager.getInstance(self)
 
-    -- Load servers, downloads, and pending syncs
-    self.servers = self.opds_settings:readSetting("servers", Constants.DEFAULT_SERVERS)
+    -- Load downloads and pending syncs
     self.downloads = self.opds_settings:readSetting("downloads", {})
     self.pending_syncs = self.opds_settings:readSetting("pending_syncs", {})
 
@@ -173,7 +172,7 @@ end
 
 function OPDS:onDispatcherRegisterActions()
     Dispatcher:registerAction("opdsplus_show_catalog",
-        { category = "none", event = "ShowOPDSPlusCatalog", title = _("OPDS Plus Catalog"), filemanager = true, }
+        { category = "none", event = "ShowOPDSPlusCatalog", title = _("Calibre-Web OPDS"), filemanager = true, }
     )
 
     Dispatcher:registerAction("opdsplus_sync_all",
@@ -185,26 +184,19 @@ function OPDS:onDispatcherRegisterActions()
     )
 end
 
-function OPDS:_createBrowserInstance()
-    return OPDSBrowser:new {
-        servers = self.servers,
+function OPDS:_createBrowserInstance(url, username, password)
+    return CalibreWebLayout:new {
+        base_url = url,
+        username = username,
+        password = password,
         downloads = self.downloads,
         settings = self.settings,
         pending_syncs = self.pending_syncs,
-        title = _("OPDS Plus Catalog"),
-        is_popout = false,
-        is_borderless = true,
-        title_bar_fm_style = true,
-        show_covers = true,
         _manager = self,
         file_downloaded_callback = function(file)
             self:showFileDownloadedDialog(file)
         end,
         close_callback = function()
-            if self.opds_browser.download_list then
-                self.opds_browser.download_list.close_callback()
-            end
-            UIManager:close(self.opds_browser)
             self.opds_browser = nil
             if self.last_downloaded_file then
                 if self.ui.file_chooser then
@@ -217,29 +209,13 @@ function OPDS:_createBrowserInstance()
     }
 end
 
-function OPDS:_startSyncFromDispatcher(force_sync)
-    -- For gesture-triggered actions, create an off-screen browser context if needed.
-    if not self.opds_browser then
-        self.opds_browser = self:_createBrowserInstance()
-    end
-
-    self.opds_browser.sync_force = force_sync
-    self.opds_browser:checkSyncDownload()
-end
-
-function OPDS:onStartOPDSSyncAllCatalogs()
-    self:_startSyncFromDispatcher(false)
-end
-
-function OPDS:onStartOPDSForceSyncAllCatalogs()
-    self:_startSyncFromDispatcher(true)
-end
-
 function OPDS:addToMainMenu(menu_items)
     if not self.ui.document then -- FileManager menu only
         menu_items.opdsplus = {
-            text = _("OPDS Plus Catalog"),
-            sub_item_table = SettingsMenu.create(self)
+            text = _("Calibre-Web OPDS"),
+            callback = function()
+                self:onShowOPDSPlusCatalog()
+            end
         }
     end
 end
@@ -292,9 +268,73 @@ function OPDS:clearCoverCache()
     SettingsDialogs.clearCoverCache()
 end
 
+function OPDS:showConnectionSettingsDialog(on_success_callback)
+    local url = self:getSetting("calibre_web_url")
+    local username = self:getSetting("calibre_web_username")
+    local password = self:getSetting("calibre_web_password")
+
+    self.url_dialog = MultiInputDialog:new{
+        title = _("Enter Calibre-Web Details"),
+        fields = {
+            { hint = _("Calibre-Web URL"), text = url or "http://" },
+            { hint = _("Username (optional)"), text = username or "" },
+            { hint = _("Password (optional)"), text = password or "", text_type = "password" },
+        },
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(self.url_dialog)
+                    end
+                },
+                {
+                    text = _("Save"),
+                    callback = function()
+                        local fields = self.url_dialog:getFields()
+                        local input_url = fields[1]
+                        local input_user = fields[2]
+                        local input_pass = fields[3]
+                        if input_url and input_url ~= "" and input_url ~= "http://" then
+                            UIManager:close(self.url_dialog)
+                            self:saveSetting("calibre_web_url", input_url)
+                            if input_user and input_user ~= "" then
+                                self:saveSetting("calibre_web_username", input_user)
+                            else
+                                self:saveSetting("calibre_web_username", false)
+                            end
+                            if input_pass and input_pass ~= "" then
+                                self:saveSetting("calibre_web_password", input_pass)
+                            else
+                                self:saveSetting("calibre_web_password", false)
+                            end
+                            if on_success_callback then
+                                on_success_callback(input_url, input_user, input_pass)
+                            end
+                        end
+                    end
+                }
+            }
+        }
+    }
+    UIManager:show(self.url_dialog)
+end
+
 function OPDS:onShowOPDSPlusCatalog()
-    self.opds_browser = self:_createBrowserInstance()
-    UIManager:show(self.opds_browser)
+    local url = self:getSetting("calibre_web_url")
+    local username = self:getSetting("calibre_web_username")
+    local password = self:getSetting("calibre_web_password")
+    
+    if not url or url == "" then
+        self:showConnectionSettingsDialog(function(new_url, new_user, new_pass)
+            self.opds_browser = self:_createBrowserInstance(new_url, new_user, new_pass)
+            UIManager:show(self.opds_browser)
+        end)
+    else
+        self.opds_browser = self:_createBrowserInstance(url, username, password)
+        UIManager:show(self.opds_browser)
+    end
 end
 
 function OPDS:showFileDownloadedDialog(file)

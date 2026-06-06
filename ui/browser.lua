@@ -1,6 +1,4 @@
 local BD = require("ui/bidi")
-local ButtonDialog = require("ui/widget/buttondialog")
-local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
 local Menu = require("ui/widget/menu")
 local NetworkMgr = require("ui/network/manager")
@@ -17,9 +15,6 @@ local OPDSCoverMenu = require("ui.menus.cover_menu")
 -- Import constants and utilities
 local Constants = require("models.constants")
 
--- Import the OPDS menu builder
-local OPDSMenuBuilder = require("ui.dialogs.menu_builder")
-
 -- Import the download manager
 local DownloadManager = require("core.download_manager")
 local DownloadDialogBuilder = require("ui.dialogs.download_builder")
@@ -29,9 +24,6 @@ local BookInfoDialog = require("ui.dialogs.book_info_dialog")
 
 -- Import the feed fetcher
 local FeedFetcher = require("core.feed_fetcher")
-
--- Import the catalog manager
-local CatalogManager = require("core.catalog_manager")
 
 -- Import the navigation handler
 local NavigationHandler = require("core.navigation_handler")
@@ -69,11 +61,13 @@ local OPDSBrowser = OPDSCoverMenu:extend {
 }
 
 function OPDSBrowser:init()
-    self.item_table = self:genItemTableFromRoot()
+    self.item_table = {}
     self.catalog_title = nil
     self.title_bar_left_icon = Constants.ICONS.MENU
     self.onLeftButtonTap = function()
-        self:showOPDSMenu()
+        if self.toggle_sidebar_callback then
+            self.toggle_sidebar_callback()
+        end
     end
 
     self.title_bar_right_icon = nil
@@ -119,61 +113,6 @@ function OPDSBrowser:toggleViewMode()
     end
 end
 
-function OPDSBrowser:showOPDSMenu()
-    local dialog = OPDSMenuBuilder.buildOPDSMenu(self)
-    UIManager:show(dialog)
-end
-
--- Shows facet menu for OPDS catalogs with facets/search support
-function OPDSBrowser:showFacetMenu()
-    local catalog_url = self.paths[#self.paths].url
-    local has_covers = OPDSMenuBuilder.hasCovers(self.item_table)
-
-    local dialog = OPDSMenuBuilder.buildFacetMenu(self, catalog_url, has_covers)
-    UIManager:show(dialog)
-end
-
--- Shows menu for catalogs without facets but with covers (for view toggle)
-function OPDSBrowser:showCatalogMenu()
-    local catalog_url = self.paths[#self.paths].url
-    local has_covers = OPDSMenuBuilder.hasCovers(self.item_table)
-
-    local dialog = OPDSMenuBuilder.buildCatalogMenu(self, catalog_url, has_covers)
-    UIManager:show(dialog)
-end
-
-function OPDSBrowser:genItemTableFromRoot()
-    return CatalogManager.genItemTableFromRoot(self.servers, self.downloads, _)
-end
-
-function OPDSBrowser:addEditCatalog(item)
-    local dialog = OPDSMenuBuilder.buildCatalogEditDialog(self, item)
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
-end
-
-function OPDSBrowser:addSubCatalog(item_url)
-    local dialog = OPDSMenuBuilder.buildSubCatalogDialog(self, item_url)
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
-end
-
-function OPDSBrowser:editCatalogFromInput(fields, item, no_refresh)
-    -- luacheck: ignore new_idx
-    local new_idx, itemnumber, should_refresh = CatalogManager.editCatalogFromInput(
-        self.servers, self.item_table, fields, item, no_refresh)
-
-    if should_refresh then
-        self:switchItemTable(nil, self.item_table, itemnumber)
-    end
-    StateManager.getInstance():markDirty()
-end
-
-function OPDSBrowser:deleteCatalog(item)
-    self.item_table = CatalogManager.deleteCatalog(self.servers, self.item_table, item)
-    self:switchItemTable(nil, self.item_table, -1)
-    StateManager.getInstance():markDirty()
-end
 
 function OPDSBrowser:fetchFeed(item_url, headers_only)
     return FeedFetcher.fetchFeed(item_url, headers_only,
@@ -228,7 +167,35 @@ function OPDSBrowser:appendCatalog(item_url)
 end
 
 function OPDSBrowser:searchCatalog(item_url)
-    local dialog = OPDSMenuBuilder.buildSearchDialog(self, item_url)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new {
+        title = _("Search OPDS catalog"),
+        input_hint = _("Search terms"),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Search"),
+                    is_enter_default = true,
+                    callback = function()
+                        UIManager:close(dialog)
+                        self.catalog_title = _("Search results")
+                        local search_str = util.urlEncode(dialog:getInputText())
+                        local search_url = item_url:gsub("%%s", function() return search_str end)
+                        search_url = search_url:gsub("{searchTerms}", function() return search_str end)
+                        self:updateCatalog(search_url)
+                    end,
+                },
+            },
+        },
+    }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
 end
@@ -270,19 +237,7 @@ function OPDSBrowser:onMenuSelect(item)
         -- Show book info dialog first, allowing user to see details before downloading
         local book_info_dialog = BookInfoDialog.build(self, item)
         UIManager:show(book_info_dialog)
-    else                         -- catalog or Search item
-        if #self.paths == 0 then -- root list
-            if item.idx == 1 then
-                if #self.downloads > 0 then
-                    self:showDownloadList()
-                end
-                return true
-            end
-            self.root_catalog_title     = item.text
-            self.root_catalog_username  = item.username
-            self.root_catalog_password  = item.password
-            self.root_catalog_raw_names = item.raw_names
-        end
+    else
         local connect_callback
         if item.searchable then
             connect_callback = function()
@@ -296,65 +251,6 @@ function OPDSBrowser:onMenuSelect(item)
         end
         NetworkMgr:runWhenConnected(connect_callback)
     end
-    return true
-end
-
--- Menu action on item long-press (dialog Edit / Delete catalog)
-function OPDSBrowser:onMenuHold(item)
-    if #self.paths > 0 or item.idx == 1 then return true end -- not root list or Downloads item
-    local dialog
-    dialog = ButtonDialog:new {
-        title = item.text,
-        title_align = "center",
-        buttons = {
-            {
-                {
-                    text = _("Force sync"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        NetworkMgr:runWhenConnected(function()
-                            self.sync_force = true
-                            self:checkSyncDownload(item.idx)
-                        end)
-                    end,
-                },
-                {
-                    text = _("Sync"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        NetworkMgr:runWhenConnected(function()
-                            self.sync_force = false
-                            self:checkSyncDownload(item.idx)
-                        end)
-                    end,
-                },
-            },
-            {},
-            {
-                {
-                    text = _("Delete"),
-                    callback = function()
-                        UIManager:show(ConfirmBox:new {
-                            text = _("Delete OPDS catalog?"),
-                            ok_text = _("Delete"),
-                            ok_callback = function()
-                                UIManager:close(dialog)
-                                self:deleteCatalog(item)
-                            end,
-                        })
-                    end,
-                },
-                {
-                    text = _("Edit"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        self:addEditCatalog(item)
-                    end,
-                },
-            },
-        },
-    }
-    UIManager:show(dialog)
     return true
 end
 
@@ -381,21 +277,27 @@ end
 
 -- Menu action on next-page chevron tap (request and show more catalog entries)
 function OPDSBrowser:onNextPage(fill_only)
-    -- self.page_num comes from menu.lua
-    local page_num = self.page_num
-    -- fetch more entries until we fill out one page or reach the end
-    while page_num == self.page_num do
+    local perpage = self.perpage or 1
+    logger.warn("ONNEXTPAGE:", "onNextPage called. fill_only:", fill_only, "perpage:", perpage, "item_table size:", #self.item_table, "page:", self.page)
+    
+    -- fetch more entries until we have enough unseen items for at least one full next page
+    while (#self.item_table - (self.page * perpage)) < perpage do
+        logger.warn("ONNEXTPAGE:", "fetching more entries. unseen items:", #self.item_table - (self.page * perpage))
         local hrefs = self.item_table.hrefs
         if hrefs and hrefs.next then
+            logger.warn("ONNEXTPAGE:", "appending next catalog:", hrefs.next)
             if not self:appendCatalog(hrefs.next) then
+                logger.warn("ONNEXTPAGE:", "error appending to catalog")
                 break -- reach end of paging
             end
         else
+            logger.warn("ONNEXTPAGE:", "no more next hrefs, breaking")
             break
         end
     end
+    
     if not fill_only then
-        -- We also *do* want to paginate, so call the base class.
+        logger.warn("ONNEXTPAGE:", "calling base onNextPage")
         OPDSCoverMenu.onNextPage(self)
     end
     return true
@@ -486,11 +388,6 @@ function OPDSBrowser:getFileName(item)
         filename = nil
     end
     return util.replaceAllInvalidChars(filename), util.replaceAllInvalidChars(filename_orig)
-end
-
-function OPDSBrowser:updateFieldInCatalog(item, name, value)
-    CatalogManager.updateCatalogField(item, name, value)
-    StateManager.getInstance():markDirty()
 end
 
 function OPDSBrowser:checkSyncDownload(idx)

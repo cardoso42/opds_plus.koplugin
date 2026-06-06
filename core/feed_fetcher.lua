@@ -97,6 +97,7 @@ end
 -- @param debug_callback function|nil Optional debug logging callback
 -- @return table Parsed feed or nil on error
 function FeedFetcher.parseFeed(item_url, username, password, debug_callback)
+	logger.info("FeedFetcher.parseFeed: Starting fetch for URL:", item_url)
 	local headers = FeedFetcher.fetchFeed(item_url, true, username, password)
 	local feed_last_modified = headers and headers["last-modified"]
 	local feed
@@ -105,24 +106,32 @@ function FeedFetcher.parseFeed(item_url, username, password, debug_callback)
 		local hash = "opds|catalog|" .. item_url .. "|" .. feed_last_modified
 		feed = CatalogCache:check(hash)
 		if feed then
-			if debug_callback then
-				debug_callback("Cache hit for", item_url)
-			end
+			if debug_callback then debug_callback("Cache hit for", item_url) end
+			logger.info("FeedFetcher.parseFeed: Cache hit.")
 		else
-			if debug_callback then
-				debug_callback("Cache miss, fetching", item_url)
-			end
+			if debug_callback then debug_callback("Cache miss, fetching", item_url) end
+			logger.info("FeedFetcher.parseFeed: Cache miss, downloading feed...")
 			feed = FeedFetcher.fetchFeed(item_url, false, username, password)
 			if feed then
 				CatalogCache:insert(hash, feed)
 			end
 		end
 	else
+		logger.info("FeedFetcher.parseFeed: No last-modified header, downloading feed without caching...")
 		feed = FeedFetcher.fetchFeed(item_url, false, username, password)
 	end
 
 	if feed then
-		return OPDSParser:parse(feed)
+		logger.info("FeedFetcher.parseFeed: Feed downloaded successfully. Length:", string.len(feed))
+		local parsed_feed = OPDSParser:parse(feed)
+		if parsed_feed then
+			logger.info("FeedFetcher.parseFeed: OPDS parsing successful!")
+			return parsed_feed
+		else
+			logger.warn("FeedFetcher.parseFeed: OPDS parsing returned nil!")
+		end
+	else
+		logger.warn("FeedFetcher.parseFeed: Downloaded feed is nil!")
 	end
 
 	return nil

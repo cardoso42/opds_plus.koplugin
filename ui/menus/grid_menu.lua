@@ -99,12 +99,6 @@ function OPDSGridCell:init()
                 range = self.dimen,
             },
         },
-        HoldSelect = {
-            GestureRange:new {
-                ges = "hold",
-                range = self.dimen,
-            },
-        },
     }
 
     -- Create cover widget
@@ -303,14 +297,6 @@ end
 function OPDSGridCell:onTapSelect(arg, ges)
     if self.menu and self.menu.onMenuSelect then
         self.menu:onMenuSelect(self.entry)
-        return true
-    end
-    return false
-end
-
-function OPDSGridCell:onHoldSelect(arg, ges)
-    if self.menu and self.menu.onMenuHold then
-        self.menu:onMenuHold(self.entry)
         return true
     end
     return false

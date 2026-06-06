@@ -109,12 +109,6 @@ function OPDSListMenuItem:init()
                 range = self.dimen,
             },
         },
-        HoldSelect = {
-            GestureRange:new {
-                ges = "hold",
-                range = self.dimen,
-            },
-        },
     }
 
     local inner_cover_widget
@@ -293,15 +287,6 @@ end
 function OPDSListMenuItem:onTapSelect(arg, ges)
     if self.menu and self.menu.onMenuSelect then
         self.menu:onMenuSelect(self.entry)
-        return true
-    end
-    return false
-end
-
--- Handle hold events - delegate to parent menu
-function OPDSListMenuItem:onHoldSelect(arg, ges)
-    if self.menu and self.menu.onMenuHold then
-        self.menu:onMenuHold(self.entry)
         return true
     end
     return false
